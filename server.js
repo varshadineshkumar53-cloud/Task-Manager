@@ -90,4 +90,4 @@ const server=http.createServer((req,res)=>{
   res.writeHead(200,{"Content-Type":types[ext]||"application/octet-stream"});
   fs.createReadStream(fp).pipe(res);
 });
-server.listen(PORT,()=>console.log(`\nTASK MANAGER READY\nOpen: http://localhost:${PORT}\n`));
+server.listen(PORT, "0.0.0.0", () => console.log(`TASK MANAGER READY on port ${PORT}`));
