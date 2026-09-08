@@ -1,0 +1,32 @@
+{
+  "users": [
+    {
+      "id": "mtstpwykizb8qn",
+      "name": "Varshaa D",
+      "email": "varshadineshkumar53@gmail.com",
+      "password": "775e009571bb6cedb9ba1d9b50d3b918dd563e2cc8aad84a76b726aed3abf2d5"
+    },
+    {
+      "id": "mtsts65v6755ny",
+      "name": "theertha",
+      "email": "310625104420@eec.srmrmp.edu.in",
+      "password": "9de15b1613a4ba3e064c75b0047f4b2eefbb45d509d74291a977cfa0b13a5ece"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "mtstr6kghyqcel",
+      "userId": "mtstpwykizb8qn",
+      "title": "eat",
+      "completed": true,
+      "createdAt": "2026-09-08T15:28:47.872Z"
+    },
+    {
+      "id": "mtstrcpi5m2iy1",
+      "userId": "mtstpwykizb8qn",
+      "title": "sleep",
+      "completed": false,
+      "createdAt": "2026-09-08T15:28:55.830Z"
+    }
+  ]
+}
