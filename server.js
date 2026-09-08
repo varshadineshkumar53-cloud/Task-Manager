@@ -3,91 +3,413 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const PORT = 5050;
+const PORT = process.env.PORT || 5050;
+
 const DATA = path.join(__dirname, "data.json");
 const SECRET = "fresh-task-manager-2026";
 
-if (!fs.existsSync(DATA)) fs.writeFileSync(DATA, JSON.stringify({users:[],tasks:[]}, null, 2));
+if (!fs.existsSync(DATA)) {
+    fs.writeFileSync(
+        DATA,
+        JSON.stringify({ users: [], tasks: [] }, null, 2)
+    );
+}
 
-const read = () => JSON.parse(fs.readFileSync(DATA, "utf8"));
-const save = d => fs.writeFileSync(DATA, JSON.stringify(d, null, 2));
+function readData() {
+    return JSON.parse(fs.readFileSync(DATA, "utf8"));
+}
 
-function hash(p) { return crypto.createHash("sha256").update(p).digest("hex"); }
-function token() { return crypto.randomBytes(32).toString("hex"); }
+function saveData(data) {
+    fs.writeFileSync(DATA, JSON.stringify(data, null, 2));
+}
+
+function hash(password) {
+    return crypto
+        .createHash("sha256")
+        .update(password)
+        .digest("hex");
+}
+
+function createToken() {
+    return crypto.randomBytes(32).toString("hex");
+}
+
 const sessions = new Map();
 
-function send(res, code, obj) {
-  res.writeHead(code, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
-  res.end(JSON.stringify(obj));
+function sendJSON(res, statusCode, data) {
+    res.writeHead(statusCode, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Methods":
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    });
+
+    res.end(JSON.stringify(data));
 }
-function body(req) {
-  return new Promise(resolve => {
-    let s=""; req.on("data", c=>s+=c); req.on("end", ()=>{try{resolve(JSON.parse(s||"{}"))}catch{resolve({})}});
-  });
+
+function getBody(req) {
+    return new Promise((resolve) => {
+        let body = "";
+
+        req.on("data", (chunk) => {
+            body += chunk;
+        });
+
+        req.on("end", () => {
+            try {
+                resolve(JSON.parse(body || "{}"));
+            } catch {
+                resolve({});
+            }
+        });
+    });
 }
-function user(req) {
-  const h=req.headers.authorization||"";
-  return sessions.get(h.startsWith("Bearer ")?h.slice(7):"");
+
+function getUser(req) {
+    const authorization = req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+        return null;
+    }
+
+    const token = authorization.substring(7);
+
+    return sessions.get(token) || null;
 }
-function id(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
 
-const api = async (req,res) => {
-  if (req.method==="OPTIONS") { res.writeHead(204,{"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"Content-Type, Authorization","Access-Control-Allow-Methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS"}); return res.end(); }
-  const url=new URL(req.url,"http://localhost");
-  const p=url.pathname;
-  const d=read();
+function createId() {
+    return (
+        Date.now().toString(36) +
+        Math.random().toString(36).substring(2, 8)
+    );
+}
 
-  if(req.method==="GET" && p==="/api/test") return send(res,200,{success:true,message:"Backend is working!"});
+async function handleAPI(req, res) {
 
-  if(req.method==="POST" && p==="/api/signup"){
-    const b=await body(req), name=String(b.name||"").trim(), email=String(b.email||"").trim().toLowerCase(), password=String(b.password||"");
-    if(!name||!email||!password)return send(res,400,{success:false,message:"Please fill all fields."});
-    if(password.length<6)return send(res,400,{success:false,message:"Password must be at least 6 characters."});
-    if(d.users.some(u=>u.email===email))return send(res,409,{success:false,message:"Email already registered. Please login."});
-    d.users.push({id:id(),name,email,password:hash(password)}); save(d);
-    return send(res,201,{success:true,message:"Account created successfully!"});
-  }
+    if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers":
+                "Content-Type, Authorization",
+            "Access-Control-Allow-Methods":
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        });
 
-  if(req.method==="POST" && p==="/api/login"){
-    const b=await body(req), email=String(b.email||"").trim().toLowerCase(), password=String(b.password||"");
-    const u=d.users.find(x=>x.email===email);
-    if(!u||u.password!==hash(password))return send(res,401,{success:false,message:"Invalid email or password."});
-    const t=token(); sessions.set(t,u.id);
-    return send(res,200,{success:true,token:t,user:{id:u.id,name:u.name,email:u.email}});
-  }
+        return res.end();
+    }
 
-  const u=user(req);
-  if(!u)return send(res,401,{success:false,message:"Please login first."});
+    const url = new URL(req.url, "http://localhost");
+    const pathname = url.pathname;
 
-  if(req.method==="GET" && p==="/api/tasks")
-    return send(res,200,{success:true,tasks:d.tasks.filter(t=>t.userId===u)});
+    const data = readData();
 
-  if(req.method==="POST" && p==="/api/tasks"){
-    const b=await body(req), title=String(b.title||"").trim();
-    if(!title)return send(res,400,{success:false,message:"Task cannot be empty."});
-    const t={id:id(),userId:u,title,completed:false,createdAt:new Date().toISOString()};
-    d.tasks.push(t);save(d);return send(res,201,{success:true,task:t});
-  }
+    // Test API
+    if (
+        req.method === "GET" &&
+        pathname === "/api/test"
+    ) {
+        return sendJSON(res, 200, {
+            success: true,
+            message: "Backend is working!"
+        });
+    }
 
-  const m=p.match(/^\/api\/tasks\/([^/]+)$/);
-  if(m){
-    const t=d.tasks.find(x=>x.id===m[1]&&x.userId===u);
-    if(!t)return send(res,404,{success:false,message:"Task not found."});
-    if(req.method==="PUT"){const b=await body(req);t.title=String(b.title||"").trim();if(!t.title)return send(res,400,{success:false,message:"Task cannot be empty."});}
-    if(req.method==="PATCH"){const b=await body(req);t.completed=b.completed===true;}
-    if(req.method==="DELETE"){d.tasks=d.tasks.filter(x=>x!==t);}
-    save(d);return send(res,200,{success:true});
-  }
-  send(res,404,{success:false,message:"Not found."});
-};
+    // SIGNUP
+    if (
+        req.method === "POST" &&
+        pathname === "/api/signup"
+    ) {
+        const body = await getBody(req);
 
-const server=http.createServer((req,res)=>{
-  if(req.url.startsWith("/api/")) return api(req,res);
-  let file=req.url==="/"?"/login.html":req.url.split("?")[0];
-  let fp=path.join(__dirname,file);
-  if(!fs.existsSync(fp)||fs.statSync(fp).isDirectory()) return res.writeHead(404).end("Not found");
-  const ext=path.extname(fp), types={".html":"text/html",".css":"text/css",".js":"text/javascript",".json":"application/json"};
-  res.writeHead(200,{"Content-Type":types[ext]||"application/octet-stream"});
-  fs.createReadStream(fp).pipe(res);
+        const name = String(body.name || "").trim();
+        const email = String(body.email || "")
+            .trim()
+            .toLowerCase();
+
+        const password = String(body.password || "");
+
+        if (!name || !email || !password) {
+            return sendJSON(res, 400, {
+                success: false,
+                message: "Please fill all fields."
+            });
+        }
+
+        if (password.length < 6) {
+            return sendJSON(res, 400, {
+                success: false,
+                message:
+                    "Password must be at least 6 characters."
+            });
+        }
+
+        const existingUser = data.users.find(
+            (user) => user.email === email
+        );
+
+        if (existingUser) {
+            return sendJSON(res, 409, {
+                success: false,
+                message:
+                    "Email already registered. Please login."
+            });
+        }
+
+        const newUser = {
+            id: createId(),
+            name: name,
+            email: email,
+            password: hash(password)
+        };
+
+        data.users.push(newUser);
+
+        saveData(data);
+
+        return sendJSON(res, 201, {
+            success: true,
+            message: "Account created successfully!"
+        });
+    }
+
+    // LOGIN
+    if (
+        req.method === "POST" &&
+        pathname === "/api/login"
+    ) {
+        const body = await getBody(req);
+
+        const email = String(body.email || "")
+            .trim()
+            .toLowerCase();
+
+        const password = String(body.password || "");
+
+        const user = data.users.find(
+            (item) => item.email === email
+        );
+
+        if (
+            !user ||
+            user.password !== hash(password)
+        ) {
+            return sendJSON(res, 401, {
+                success: false,
+                message: "Invalid email or password."
+            });
+        }
+
+        const token = createToken();
+
+        sessions.set(token, user.id);
+
+        return sendJSON(res, 200, {
+            success: true,
+            token: token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email
+            }
+        });
+    }
+
+    // AUTHENTICATION
+    const userId = getUser(req);
+
+    if (!userId) {
+        return sendJSON(res, 401, {
+            success: false,
+            message: "Please login first."
+        });
+    }
+
+    // GET TASKS
+    if (
+        req.method === "GET" &&
+        pathname === "/api/tasks"
+    ) {
+        const tasks = data.tasks.filter(
+            (task) => task.userId === userId
+        );
+
+        return sendJSON(res, 200, {
+            success: true,
+            tasks: tasks
+        });
+    }
+
+    // CREATE TASK
+    if (
+        req.method === "POST" &&
+        pathname === "/api/tasks"
+    ) {
+        const body = await getBody(req);
+
+        const title = String(body.title || "").trim();
+
+        if (!title) {
+            return sendJSON(res, 400, {
+                success: false,
+                message: "Task cannot be empty."
+            });
+        }
+
+        const task = {
+            id: createId(),
+            userId: userId,
+            title: title,
+            completed: false,
+            createdAt: new Date().toISOString()
+        };
+
+        data.tasks.push(task);
+
+        saveData(data);
+
+        return sendJSON(res, 201, {
+            success: true,
+            task: task
+        });
+    }
+
+    // TASK ID
+    const match = pathname.match(
+        /^\/api\/tasks\/([^/]+)$/
+    );
+
+    if (match) {
+
+        const taskId = match[1];
+
+        const task = data.tasks.find(
+            (item) =>
+                item.id === taskId &&
+                item.userId === userId
+        );
+
+        if (!task) {
+            return sendJSON(res, 404, {
+                success: false,
+                message: "Task not found."
+            });
+        }
+
+        // UPDATE TASK
+        if (req.method === "PUT") {
+            const body = await getBody(req);
+
+            const title = String(
+                body.title || ""
+            ).trim();
+
+            if (!title) {
+                return sendJSON(res, 400, {
+                    success: false,
+                    message: "Task cannot be empty."
+                });
+            }
+
+            task.title = title;
+
+            saveData(data);
+
+            return sendJSON(res, 200, {
+                success: true,
+                task: task
+            });
+        }
+
+        // COMPLETE TASK
+        if (req.method === "PATCH") {
+            const body = await getBody(req);
+
+            task.completed = body.completed === true;
+
+            saveData(data);
+
+            return sendJSON(res, 200, {
+                success: true,
+                task: task
+            });
+        }
+
+        // DELETE TASK
+        if (req.method === "DELETE") {
+
+            data.tasks = data.tasks.filter(
+                (item) => item.id !== taskId
+            );
+
+            saveData(data);
+
+            return sendJSON(res, 200, {
+                success: true,
+                message: "Task deleted successfully."
+            });
+        }
+    }
+
+    return sendJSON(res, 404, {
+        success: false,
+        message: "Not found."
+    });
+}
+
+// SERVER
+const server = http.createServer((req, res) => {
+
+    if (req.url.startsWith("/api/")) {
+        return handleAPI(req, res);
+    }
+
+    let filePath =
+        req.url === "/"
+            ? "/login.html"
+            : req.url.split("?")[0];
+
+    const fullPath = path.join(
+        __dirname,
+        filePath
+    );
+
+    if (
+        !fs.existsSync(fullPath) ||
+        fs.statSync(fullPath).isDirectory()
+    ) {
+        res.writeHead(404, {
+            "Content-Type": "text/plain"
+        });
+
+        return res.end("Not found");
+    }
+
+    const extension = path.extname(fullPath);
+
+    const contentTypes = {
+        ".html": "text/html",
+        ".css": "text/css",
+        ".js": "text/javascript",
+        ".json": "application/json"
+    };
+
+    res.writeHead(200, {
+        "Content-Type":
+            contentTypes[extension] ||
+            "application/octet-stream"
+    });
+
+    fs.createReadStream(fullPath).pipe(res);
 });
-server.listen(PORT, "0.0.0.0", () => console.log(`TASK MANAGER READY on port ${PORT}`));
+
+// IMPORTANT FOR RENDER
+server.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+        console.log(
+            `TASK MANAGER READY ON PORT ${PORT}`
+        );
+    }
+);
